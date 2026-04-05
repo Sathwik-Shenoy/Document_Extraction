@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Document Extractor Studio</title>
+    <meta name="description" content="Upload PDFs, DOCX files, images, and text for extraction, summarization, entity analysis, and sentiment scoring." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <div class="page-bg"></div>
+    <main class="shell">
+      <section class="hero card">
+        <div class="hero-copy">
+          <p class="eyebrow">AI document analysis workspace</p>
+          <h1>Extract, summarize, and inspect documents in one clean flow.</h1>
+          <p class="lede">
+            Upload PDFs, DOCX files, images, or text. The backend returns structured extraction,
+            summaries, entities, sentiment, and confidence scores.
+          </p>
+          <div class="hero-actions">
+            <button class="btn btn-primary" id="refresh-health">Refresh service status</button>
+            <button class="btn btn-secondary" id="load-sample">Load sample document</button>
+          </div>
+        </div>
+        <div class="hero-metrics">
+          <div class="metric-card">
+            <span class="metric-label">Service</span>
+            <strong id="service-name">Loading...</strong>
+            <span id="service-version"> </span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Health</span>
+            <strong id="health-status">Checking...</strong>
+            <span id="health-detail"> </span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Dependencies</span>
+            <strong id="dependency-status">Checking...</strong>
+            <span id="dependency-detail"> </span>
+          </div>
+        </div>
+      </section>
+
+      <section class="status-row" id="status-row">
+        <article class="status-chip card"><span>API</span><strong id="api-health-chip">Unknown</strong></article>
+        <article class="status-chip card"><span>Metrics</span><strong id="metrics-chip">Unknown</strong></article>
+        <article class="status-chip card"><span>Auth</span><strong id="auth-chip">Unknown</strong></article>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="card composer">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Composer</p>
+              <h2>Send a document to the API</h2>
+            </div>
+            <span class="hint">POST /api/v1/documents/analyze</span>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>API base URL</span>
+              <input id="api-base" type="url" value="http://127.0.0.1:8000" placeholder="http://127.0.0.1:8000" />
+            </label>
+            <label class="field">
+              <span>API key</span>
+              <input id="api-key" type="password" placeholder="Bearer token if enabled" />
+            </label>
+          </div>
+
+          <div class="dropzone" id="dropzone">
+            <input id="file-input" type="file" accept=".pdf,.docx,.txt,.md,image/*" />
+            <div class="dropzone-inner">
+              <p class="dropzone-title">Drop a file here or browse</p>
+              <p class="dropzone-copy">Supported: PDF, DOCX, TXT, MD, PNG, JPG, WEBP</p>
+              <div class="file-pill" id="file-pill">No file selected</div>
+            </div>
+          </div>
+
+          <div class="actions-row">
+            <button class="btn btn-primary" id="analyze-btn">Analyze document</button>
+            <button class="btn btn-secondary" id="clear-btn">Clear</button>
+          </div>
+
+          <div class="sample-box">
+            <span>Try a quick demo:</span>
+            <button class="text-button" id="sample-report">Internal report sample</button>
+            <button class="text-button" id="sample-shopping">Shopify training sample</button>
+          </div>
+
+          <p class="feedback" id="feedback">Upload a document to begin.</p>
+        </article>
+
+        <article class="card results">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Results</p>
+              <h2>Response preview</h2>
+            </div>
+            <span class="hint" id="result-meta">No analysis yet</span>
+          </div>
+
+          <div class="result-grid">
+            <section class="result-panel">
+              <h3>Summary</h3>
+              <p id="summary-text" class="result-copy">The summary will appear here.</p>
+            </section>
+            <section class="result-panel">
+              <h3>Sentiment</h3>
+              <p id="sentiment-text" class="result-copy">Waiting for analysis.</p>
+            </section>
+            <section class="result-panel">
+              <h3>Confidence</h3>
+              <ul id="confidence-list" class="list"></ul>
+            </section>
+            <section class="result-panel">
+              <h3>Entities</h3>
+              <div id="entity-list" class="chips"></div>
+            </section>
+          </div>
+
+          <section class="result-panel full-width">
+            <div class="panel-head">
+              <h3>Extracted text</h3>
+              <span class="hint">Layout markers are preserved when available</span>
+            </div>
+            <pre id="extracted-text" class="code-block">The extracted text will appear here.</pre>
+          </section>
+
+          <section class="result-panel full-width">
+            <div class="panel-head">
+              <h3>Raw metadata</h3>
+              <span class="hint">Processing time, file details, strategies, and warnings</span>
+            </div>
+            <pre id="metadata-json" class="code-block">{} </pre>
+          </section>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

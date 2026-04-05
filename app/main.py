@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.routes.document import router as document_router
@@ -7,6 +11,7 @@ from app.services.metrics import get_metrics
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
 app.include_router(document_router)
+app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parents[1] / "frontend"), name="frontend-static")
 
 
 @app.get("/")
@@ -15,6 +20,7 @@ def root():
         "service": settings.app_name,
         "version": settings.app_version,
         "endpoints": {
+            "frontend": "/ui",
             "health": "/health",
             "api_health": "/api/v1/health",
             "dependency_health": "/health/dependencies",
@@ -26,6 +32,16 @@ def root():
             "auth_status": "/api/v1/auth-status",
         },
     }
+
+
+@app.get("/ui", include_in_schema=False)
+def frontend():
+    return FileResponse(Path(__file__).resolve().parents[1] / "frontend" / "index.html")
+
+
+@app.get("/ui/", include_in_schema=False)
+def frontend_slash():
+    return FileResponse(Path(__file__).resolve().parents[1] / "frontend" / "index.html")
 
 
 @app.get("/health")
