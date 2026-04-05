@@ -5,7 +5,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Dict, Iterable, List, Tuple
+from typing import Any, Dict, List, Sequence, Tuple, TypedDict, cast
 
 from dateutil import parser as date_parser
 
@@ -13,11 +13,6 @@ try:
     from rapidfuzz import fuzz  # type: ignore
 except Exception:
     fuzz = None
-
-try:
-    from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
-except Exception:
-    TfidfVectorizer = None
 
 from app.core.config import settings
 
@@ -27,6 +22,43 @@ class ModelRegistry:
     summarization: Dict[str, str]
     ner: Dict[str, str]
     sentiment: Dict[str, str]
+
+
+class RawEntity(TypedDict):
+    text: str
+    label: str
+    score: float
+
+
+class CanonicalEntity(TypedDict):
+    entity: str
+    type: str
+    confidence: float
+    frequency: int
+    forms: List[str]
+    aliases: List[str]
+    normalized: str | None
+    context: str | None
+
+
+class RelationshipItem(TypedDict):
+    source: str
+    relation: str
+    target: str
+    confidence: float
+
+
+class SentimentVote(TypedDict):
+    label: str
+    score: float
+
+
+class SentimentResultPayload(TypedDict):
+    label: str
+    score: float
+    agreement: float
+    explanation: str
+    votes: Dict[str, SentimentVote]
 
 
 MODEL_REGISTRY = ModelRegistry(
@@ -68,22 +100,18 @@ def _lexical_summary(text: str, target_sentences: int = 3) -> str:
     if len(sents) <= target_sentences:
         return " ".join(sents)
 
-    if TfidfVectorizer is None:
-        scores = [len(s.split()) for s in sents]
-    else:
-        tfidf = TfidfVectorizer(stop_words="english")
-        matrix = tfidf.fit_transform(sents)
-        scores = matrix.sum(axis=1).A1
+    # Sentence length ranking keeps the fallback deterministic and avoids sparse-matrix typing noise.
+    scores = [len(s.split()) for s in sents]
     ranked = sorted(range(len(sents)), key=lambda i: scores[i], reverse=True)
     chosen_idx = sorted(ranked[:target_sentences])
     return " ".join(sents[i] for i in chosen_idx)
 
 
-def _safe_hf_pipeline(task: str, model: str):
+def _safe_hf_pipeline(task: str, model: str) -> Any | None:
     try:
         from transformers import pipeline  # type: ignore
 
-        return pipeline(task, model=model)
+        return pipeline(task, model=model)  # type: ignore[reportCallIssue]
     except Exception:
         return None
 
@@ -97,7 +125,7 @@ def summarize_hierarchical(text: str, file_type: str) -> Tuple[str, Dict[str, st
     primary = _safe_hf_pipeline("summarization", MODEL_REGISTRY.summarization["primary"]) if settings.use_heavy_models else None
     fallback = _safe_hf_pipeline("summarization", MODEL_REGISTRY.summarization["fallback"]) if settings.use_heavy_models else None
 
-    def run_abstractive(s: str):
+    def run_abstractive(s: str) -> str:
         candidate_sentences = sentence_split(s)
         top_n = max(2, math.ceil(len(candidate_sentences) * 0.5))
         reduced = _lexical_summary(s, target_sentences=min(top_n, 12))
@@ -105,7 +133,7 @@ def summarize_hierarchical(text: str, file_type: str) -> Tuple[str, Dict[str, st
         if model is None:
             raise RuntimeError("no_abstractive_model")
         output = model(reduced, max_length=180, min_length=60, do_sample=False)
-        return output[0]["summary_text"]
+        return str(output[0]["summary_text"])
 
     strategy = "lexical_fallback"
     try:
@@ -146,7 +174,7 @@ def _normalize_date(entity: str) -> str:
         return entity
 
 
-def _ner_with_spacy(text: str):
+def _ner_with_spacy(text: str) -> List[RawEntity]:
     try:
         import spacy  # type: ignore
 
@@ -155,34 +183,37 @@ def _ner_with_spacy(text: str):
         except Exception:
             return []
         doc = nlp(text)
-        return [{"text": ent.text, "label": ent.label_, "score": 0.85} for ent in doc.ents]
+        return cast(List[RawEntity], [{"text": ent.text, "label": ent.label_, "score": 0.85} for ent in doc.ents])
     except Exception:
-        return []
+        return cast(List[RawEntity], [])
 
 
-def _ner_with_transformers(text: str):
+def _ner_with_transformers(text: str) -> List[RawEntity]:
     if not settings.use_heavy_models:
         return []
     pipe = _safe_hf_pipeline("ner", MODEL_REGISTRY.ner["primary"])
     if pipe is None:
-        return []
+        return cast(List[RawEntity], [])
     try:
-        entities = pipe(text)
-        return [
-            {
-                "text": e.get("word", "").replace("##", ""),
-                "label": e.get("entity_group") or e.get("entity", "MISC"),
-                "score": float(e.get("score", 0.7)),
-            }
-            for e in entities
-            if e.get("word")
-        ]
+        entities: List[Dict[str, Any]] = cast(List[Dict[str, Any]], pipe(text))
+        return cast(
+            List[RawEntity],
+            [
+                {
+                    "text": str(e.get("word", "")).replace("##", ""),
+                    "label": str(e.get("entity_group") or e.get("entity", "MISC")),
+                    "score": float(e.get("score", 0.7)),
+                }
+                for e in entities
+                if e.get("word")
+            ],
+        )
     except Exception:
-        return []
+        return cast(List[RawEntity], [])
 
 
-def _regex_entities(text: str):
-    entities = []
+def _regex_entities(text: str) -> List[RawEntity]:
+    entities: List[RawEntity] = []
     money_pattern = r"(?:\$\s?\d[\d,]*(?:\.\d+)?\s?(?:USD)?)|(?:\d[\d,]*(?:\.\d+)?\s?USD)"
     date_pattern = r"\b(?:\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{1,2}\s+[A-Za-z]+\s+\d{4}|[A-Za-z]{3,9}\s+\d{1,2},\s*\d{4})\b"
     org_pattern = r"\b[A-Z][A-Za-z0-9&\-]+\s(?:Corp(?:oration)?|Inc\.?|LLC|Ltd\.?|Company)\b"
@@ -197,7 +228,7 @@ def _regex_entities(text: str):
     return entities
 
 
-def _canonicalize(raw_entities: List[dict], text: str) -> List[dict]:
+def _canonicalize(raw_entities: List[RawEntity], text: str) -> List[CanonicalEntity]:
     if not raw_entities:
         return []
 
@@ -206,7 +237,7 @@ def _canonicalize(raw_entities: List[dict], text: str) -> List[dict]:
             return float(fuzz.token_sort_ratio(a, b))
         return SequenceMatcher(None, a, b).ratio() * 100.0
 
-    clusters: List[dict] = []
+    clusters: List[CanonicalEntity] = []
     for ent in raw_entities:
         value = ent["text"].strip()
         if not value:
@@ -260,10 +291,10 @@ def _canonicalize(raw_entities: List[dict], text: str) -> List[dict]:
     return clusters
 
 
-def extract_relationships(text: str, entities: List[dict]) -> List[dict]:
-    relationships = []
-    people = [e["entity"] for e in entities if e["type"] in {"PERSON", "PER"}]
-    orgs = [e["entity"] for e in entities if e["type"] == "ORG"]
+def extract_relationships(text: str, entities: Sequence[CanonicalEntity]) -> List[RelationshipItem]:
+    relationships: List[RelationshipItem] = []
+    people: List[str] = [str(e["entity"]) for e in entities if e["type"] in {"PERSON", "PER"}]
+    orgs: List[str] = [str(e["entity"]) for e in entities if e["type"] == "ORG"]
     for person in people:
         for org in orgs:
             pattern = rf"{re.escape(person)}[^.\n]{{0,60}}(?:CEO|CFO|founder|director)\s+(?:of|at)\s+{re.escape(org)}"
@@ -279,8 +310,8 @@ def extract_relationships(text: str, entities: List[dict]) -> List[dict]:
     return relationships
 
 
-def extract_entities(text: str) -> Tuple[List[dict], List[dict], Dict[str, str]]:
-    raw = _ner_with_transformers(text)
+def extract_entities(text: str) -> Tuple[List[CanonicalEntity], List[RelationshipItem], Dict[str, str]]:
+    raw: List[RawEntity] = _ner_with_transformers(text)
     strategy = "transformers_ner"
     if not raw:
         raw = _ner_with_spacy(text)
@@ -341,7 +372,7 @@ def _lexical_vote(text: str) -> Tuple[str, float]:
     return "neutral", 0.5
 
 
-def analyze_sentiment(text: str) -> Tuple[dict, Dict[str, str]]:
+def analyze_sentiment(text: str) -> Tuple[SentimentResultPayload, Dict[str, str]]:
     dist_label, dist_score = _distilbert_vote(text)
     mnli_a_label, mnli_a_score = _mnli_vote(text, MODEL_REGISTRY.sentiment["bert_mnli"])
     mnli_b_label, mnli_b_score = _mnli_vote(text, MODEL_REGISTRY.sentiment["roberta_mnli"])
@@ -351,7 +382,7 @@ def analyze_sentiment(text: str) -> Tuple[dict, Dict[str, str]]:
         dist_label, dist_score = lex_label, max(dist_score, lex_score)
 
     weights = {"distilbert": 0.5, "bert_mnli": 0.25, "roberta_mnli": 0.25}
-    tally = defaultdict(float)
+    tally: defaultdict[str, float] = defaultdict(float)
     tally[dist_label] += weights["distilbert"] * dist_score
     tally[mnli_a_label] += weights["bert_mnli"] * mnli_a_score
     tally[mnli_b_label] += weights["roberta_mnli"] * mnli_b_score
@@ -363,7 +394,7 @@ def analyze_sentiment(text: str) -> Tuple[dict, Dict[str, str]]:
     if score < 0.65 or agreement < 0.5:
         label = "mixed"
 
-    explanation_bits = []
+    explanation_bits: List[str] = []
     if "not" in text.lower() or "no" in text.lower() or "never" in text.lower():
         explanation_bits.append("negation patterns were detected")
     if label == "mixed":

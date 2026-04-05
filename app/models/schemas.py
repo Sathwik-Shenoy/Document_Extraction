@@ -1,6 +1,10 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
+
+
+def _empty_relationship_items() -> list["RelationshipItem"]:
+    return []
 
 
 class EntityItem(BaseModel):
@@ -8,8 +12,8 @@ class EntityItem(BaseModel):
     type: str
     confidence: float = Field(ge=0.0, le=1.0)
     frequency: int = Field(ge=1)
-    forms: List[str] = Field(default_factory=list)
-    aliases: List[str] = Field(default_factory=list)
+    forms: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
     normalized: Optional[str] = None
     context: Optional[str] = None
 
@@ -25,7 +29,7 @@ class SentimentResult(BaseModel):
     label: str
     score: float = Field(ge=0.0, le=1.0)
     explanation: str
-    votes: Dict[str, Dict[str, object]] = Field(default_factory=dict)
+    votes: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
 class ConfidenceScores(BaseModel):
@@ -41,9 +45,9 @@ class AnalyzeResponse(BaseModel):
     file_type: str
     extracted_text: str
     summary: str
-    entities: List[EntityItem]
-    relationships: List[RelationshipItem] = Field(default_factory=list)
+    entities: list[EntityItem]
+    relationships: list[RelationshipItem] = Field(default_factory=_empty_relationship_items)
     sentiment: SentimentResult
     confidence_scores: ConfidenceScores
     model_versions: Dict[str, str]
-    metadata: Dict[str, object]
+    metadata: Dict[str, Any]

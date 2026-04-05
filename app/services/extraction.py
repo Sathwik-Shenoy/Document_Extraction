@@ -5,23 +5,31 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import Any, List, cast
 
 import numpy as np
 from PIL import Image
+
+
+def _empty_warnings() -> List[str]:
+    return []
+
+
+def _empty_metadata() -> dict[str, Any]:
+    return {}
 
 
 @dataclass
 class ExtractionResult:
     text: str
     file_type: str
-    warnings: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=_empty_warnings)
     unreadable_tokens: int = 0
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=_empty_metadata)
 
 
-def get_extraction_dependency_status() -> dict:
-    status = {
+def get_extraction_dependency_status() -> dict[str, Any]:
+    status: dict[str, Any] = {
         "pdf": {"python_package": "pdfplumber", "available": False},
         "docx": {"python_package": "python-docx", "available": False},
         "image": {
@@ -92,23 +100,33 @@ def _safe_import_tesseract():
         return None
 
 
+def _normalize_tesseract_data(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    typed_data = cast(dict[str, Any], data)
+    normalized: dict[str, Any] = {}
+    for key, value in typed_data.items():
+        normalized[str(key)] = value
+    return normalized
+
+
 def preprocess_image_for_ocr(raw_bytes: bytes):
-    cv2 = _safe_import_cv2()
+    cv2: Any = _safe_import_cv2()
     if cv2 is None:
         image = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
         return np.array(image), ["opencv_not_available"]
 
     np_arr = np.frombuffer(raw_bytes, np.uint8)
-    image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    image: Any = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
     warnings: List[str] = []
 
     if image is None:
         pil_img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
         return np.array(pil_img), ["image_decode_fallback"]
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray: Any = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    laplacian_variance = cv2.Laplacian(gray, cv2.CV_64F).var()
+    laplacian_variance: float = float(cv2.Laplacian(gray, cv2.CV_64F).var())
     if laplacian_variance < 100:
         warnings.append("blurry_image")
         sharp_kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
@@ -116,7 +134,7 @@ def preprocess_image_for_ocr(raw_bytes: bytes):
         image = cv2.filter2D(image, -1, sharp_kernel)
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    coords = np.column_stack(np.where(gray < 200))
+    coords: Any = np.column_stack(np.where(gray < 200))
     if coords.size > 0:
         angle = cv2.minAreaRect(coords)[-1]
         if angle < -45:
@@ -128,7 +146,8 @@ def preprocess_image_for_ocr(raw_bytes: bytes):
             image = cv2.warpAffine(image, matrix, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    p10, p90 = np.percentile(gray, [10, 90])
+    gray_arr = np.asarray(gray, dtype=np.float64)
+    p10, p90 = np.percentile(gray_arr, [10, 90])
     if (p90 - p10) < 65:
         warnings.append("low_contrast")
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -138,7 +157,7 @@ def preprocess_image_for_ocr(raw_bytes: bytes):
 
 
 def extract_image_text(raw_bytes: bytes) -> ExtractionResult:
-    pytesseract = _safe_import_tesseract()
+    pytesseract: Any = _safe_import_tesseract()
     image, warnings = preprocess_image_for_ocr(raw_bytes)
 
     if pytesseract is None:
@@ -150,12 +169,15 @@ def extract_image_text(raw_bytes: bytes) -> ExtractionResult:
             metadata={"ocr_confidence_mean": 0.0},
         )
 
-    data = pytesseract.image_to_data(image, config="--psm 6 --oem 3", output_type=pytesseract.Output.DICT)
+    data: Any = pytesseract.image_to_data(image, config="--psm 6 --oem 3", output_type=pytesseract.Output.DICT)
+    data_dict = _normalize_tesseract_data(data)
     tokens: List[str] = []
     unreadable = 0
-    confidences = []
-    for txt, conf in zip(data.get("text", []), data.get("conf", [])):
-        txt = (txt or "").strip()
+    confidences: List[float] = []
+    texts: List[Any] = list(data_dict.get("text", []))
+    confs: List[Any] = list(data_dict.get("conf", []))
+    for txt, conf in zip(texts, confs):
+        txt = str(txt or "").strip()
         if not txt:
             continue
         conf_val = float(conf) if str(conf).replace(".", "", 1).lstrip("-").isdigit() else -1
@@ -184,7 +206,7 @@ def extract_pdf_text(raw_bytes: bytes) -> ExtractionResult:
     except Exception:
         return ExtractionResult(text="", file_type="pdf", warnings=["pdfplumber_not_available"])
 
-    texts = []
+    texts: List[str] = []
     table_count = 0
     with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
         for i, page in enumerate(pdf.pages, start=1):
@@ -197,7 +219,7 @@ def extract_pdf_text(raw_bytes: bytes) -> ExtractionResult:
                 tables = []
 
             for t_idx, table in enumerate(tables, start=1):
-                rows = []
+                rows: List[str] = []
                 for row in table:
                     clean_cells = [((c or "").strip().replace("\n", " ")) for c in row]
                     if any(clean_cells):
@@ -208,7 +230,7 @@ def extract_pdf_text(raw_bytes: bytes) -> ExtractionResult:
 
             texts.append("\n".join(page_chunks).strip())
 
-    merged = "\n---PAGE_BREAK---\n".join(t for t in texts if t)
+    merged = "\n---PAGE_BREAK---\n".join(text for text in texts if text)
     return ExtractionResult(text=merged, file_type="pdf", metadata={"pages": len(texts), "tables": table_count})
 
 
@@ -225,9 +247,10 @@ def extract_docx_text(raw_bytes: bytes) -> ExtractionResult:
         txt = (p.text or "").strip()
         if not txt:
             continue
-        if p.style and "Heading" in p.style.name:
+        style_name = p.style.name if p.style and p.style.name else ""
+        if "Heading" in style_name:
             heading_count += 1
-            level_match = re.search(r"(\d+)", p.style.name)
+            level_match = re.search(r"(\d+)", style_name)
             level = int(level_match.group(1)) if level_match else 1
             level = max(1, min(level, 6))
             lines.append(f"{'#' * level} {txt}")
@@ -236,7 +259,7 @@ def extract_docx_text(raw_bytes: bytes) -> ExtractionResult:
 
     table_count = 0
     for t_idx, table in enumerate(doc.tables, start=1):
-        rows = []
+        rows: List[str] = []
         for row in table.rows:
             cells = [((cell.text or "").strip().replace("\n", " ")) for cell in row.cells]
             if any(cells):
